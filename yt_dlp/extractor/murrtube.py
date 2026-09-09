@@ -7,8 +7,51 @@ from ..utils import (
     urlencode_postdata,
 )
 
+class MurrtubeBaseIE(InfoExtractor):
+    _BASE_URL = 'https://murrtube.net/'
 
-class MurrtubeIE(InfoExtractor):
+    _age_check_done = False
+
+    def _real_initialize(self):
+        self._accept_age_check()
+
+    def _accept_age_check(self):
+        if MurrtubeBaseIE._age_check_done:
+            return
+        
+        landing = self._download_webpage(self._BASE_URL, None, note='Checking home page for age check')
+        age_form = self._hidden_inputs(landing)
+
+        # If there's no age form, we're good
+        if not age_form:
+            MurrtubeBaseIE._age_check_done = True
+            return
+
+        # Submit the age confirmation form
+        self._download_webpage(
+            f'{self._BASE_URL}accept_age_check', None,
+            note='Accepting age check',
+            data=urlencode_postdata(age_form),
+            headers={
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Referer': self._BASE_URL,
+                'X-Requested-With': 'XMLHttpRequest',
+            })
+        
+        MurrtubeBaseIE._age_check_done = True
+
+    def _extract_data_page(self, webpage, video_id):
+        app_div = get_element_html_by_id('app', webpage)
+        if not app_div:
+            raise ExtractorError('Could not find app element')
+        
+        data_page_str = extract_attributes(app_div).get('data-page')
+        if not data_page_str:
+            raise ExtractorError('Could not find data-page attribute')
+
+        return self._parse_json(data_page_str, video_id, errnote="Failed to parse JSON from data-page element")
+
+class MurrtubeIE(MurrtubeBaseIE):
     _VALID_URL = r'https?://murrtube\.net/v/(?P<id>\w+)'
     _TESTS = [{
         'url': 'https://murrtube.net/v/IAPW',
@@ -60,50 +103,13 @@ class MurrtubeIE(InfoExtractor):
         }
     }]
 
-    _age_check_done = False
-
-    def _accept_age_check(self):
-        if MurrtubeIE._age_check_done:
-            return
-        
-        landing = self._download_webpage('https://murrtube.net/', None, note='Checking home page for age check')
-        age_form = self._hidden_inputs(landing)
-
-        # If there's no age form, we're good
-        if not age_form:
-            MurrtubeIE._age_check_done = True
-            return
-
-        # Submit the age confirmation form
-        self._download_webpage(
-            'https://murrtube.net/accept_age_check', None,
-            note='Accepting age check',
-            data=urlencode_postdata(age_form),
-            headers={
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'Referer': 'https://murrtube.net/',
-                'X-Requested-With': 'XMLHttpRequest',
-            })
-        
-        MurrtubeIE._age_check_done = True
-
-
     def _real_extract(self, url):
         video_id = self._match_id(url)
 
-        self._accept_age_check()
-
         webpage = self._download_webpage(url, video_id)
 
-        app_div = get_element_html_by_id('app', webpage)
-        if not app_div:
-            raise ExtractorError('Could not find app element')
+        data = self._extract_data_page(webpage, video_id)
         
-        data_page_str = extract_attributes(app_div).get('data-page')
-        if not data_page_str:
-            raise ExtractorError('Could not find data-page attribute')
-        
-        data = self._parse_json(data_page_str, video_id)
         medium = data.get('props', {}).get('medium', {})
 
         formats = self._extract_m3u8_formats(medium.get('hls_url'), video_id, 'mp4') if medium.get('hls_url') else []
@@ -143,25 +149,18 @@ class MurrtubeUserIE(MurrtubeIE):
     def _entries(self, url, username):
         page = 1
         while True:
-            url_page = f'https://murrtube.net/{username}?page={page}' if page > 1 else url
+            url_page = f'{self._BASE_URL}{username}?page={page}' if page > 1 else url
             webpage = self._download_webpage(url_page, username, f'Downloading page {page}')
             
-            app_div = get_element_html_by_id('app', webpage)
-            if not app_div:
-                break
-                
-            data_page_str = extract_attributes(app_div).get('data-page')
-            if not data_page_str:
-                break
-                
-            data = self._parse_json(data_page_str, username)
+            data = self._extract_data_page(webpage, username)
+            
             props = data.get('props', {})
             media = props.get('media', [])
             
             for item in media:
                 short_code = item.get('short_code')
                 if short_code:
-                    yield self.url_result(f'https://murrtube.net/v/{short_code}')
+                    yield self.url_result(f'{self._BASE_URL}v/{short_code}')
             
             pagination = props.get('pagination', {})
             if page >= pagination.get('pages', 1):
@@ -171,6 +170,5 @@ class MurrtubeUserIE(MurrtubeIE):
 
     def _real_extract(self, url):
         username = self._match_id(url)
-        self._accept_age_check()
         
         return self.playlist_result(self._entries(url, username), playlist_id=username)
