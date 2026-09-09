@@ -130,7 +130,7 @@ class MurrtubeIE(InfoExtractor):
 
 class MurrtubeUserIE(MurrtubeIE):
     IE_DESC = 'Murrtube user profile'
-    _VALID_URL = r'https?://murrtube\.net/(?P<id>[^/]+)$'
+    _VALID_URL = r'https?://murrtube\.net/(?P<id>[^/?]+)(?:\?|$)'
     _TESTS = [{
         'url': 'https://murrtube.net/stormy',
         'info_dict': {
