@@ -114,7 +114,7 @@ class MurrtubeIE(MurrtubeBaseIE):
         
         medium = traverse_obj(data, ('props', 'medium'))
 
-        formats = self._extract_m3u8_formats(medium.get('hls_url'), video_id, 'mp4') if medium.get('hls_url') else []
+        formats = self._extract_m3u8_formats(medium.get('hls_url'), video_id, 'mp4')
 
         return {
             'id': video_id,
