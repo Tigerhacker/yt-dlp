@@ -1,12 +1,16 @@
+import itertools
 from .common import InfoExtractor
 from ..utils import (
-    extract_attributes,
-    unified_timestamp,
-    urlencode_postdata,
     IDENTITY,
+    extract_attributes,
+    find_element,
+    int_or_none,
+    parse_qs,
     require,
     traverse_obj,
-    find_element,
+    unified_timestamp,
+    update_url_query,
+    urlencode_postdata,
 )
 
 class MurrtubeBaseIE(InfoExtractor):
@@ -145,30 +149,40 @@ class MurrtubeUserIE(MurrtubeIE):
             'id': 'stormy',
         },
         'playlist_mincount': 10,
-    }]
+    }, {
+        'url': 'https://murrtube.net/sacris',
+        'info_dict': {
+            'id': 'sacris',
+        },
+        'playlist_mincount': 62,
+    },]
     _PAGE_SIZE = 60
 
     def _entries(self, url, username):
-        page = 1
-        while True:
-            url_page = f'{self._BASE_URL}{username}?page={page}' if page > 1 else url
-            webpage = self._download_webpage(url_page, username, f'Downloading page {page}')
-            
-            data = self._extract_data_page(webpage, username)
-            
-            props = data.get('props', {})
-            media = props.get('media', [])
-            
-            for item in media:
-                short_code = item.get('short_code')
-                if short_code:
-                    yield self.url_result(f'{self._BASE_URL}v/{short_code}')
-            
-            pagination = props.get('pagination', {})
-            if page >= pagination.get('pages', 1):
+        url_page = url
+        the_page = traverse_obj(parse_qs(url), (
+            'page', -1, {int_or_none}, all))
+        for page in the_page or itertools.count(1):
+            if not url_page:
+                url_page = update_url_query(
+                    f'{self._BASE_URL}{username}',
+                    query={'page': page})
+            webpage = self._download_webpage(
+                url_page, username, f'Downloading page {page}')
+            data = self._extract_data_page(webpage, username, fatal=False)
+            if not data:
                 break
-                
-            page += 1
+            props = traverse_obj(data, ('props', {dict}) or {})
+            for short_code in traverse_obj(props, (
+                    'media', ..., 'short_code')):
+                if short_code:
+                    yield self.url_result(
+                        f'{self._BASE_URL}v/{short_code}',
+                        MurrtubeIE)
+            if page >= (traverse_obj(props, (
+                    'pagination', 'pages', {int_or_none})) or 1):
+                break
+            url_page = None
 
     def _real_extract(self, url):
         username = self._match_id(url)
