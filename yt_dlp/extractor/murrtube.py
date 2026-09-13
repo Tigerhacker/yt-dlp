@@ -1,10 +1,12 @@
 from .common import InfoExtractor
 from ..utils import (
-    ExtractorError,
     extract_attributes,
-    get_element_html_by_id,
     unified_timestamp,
     urlencode_postdata,
+    IDENTITY,
+    require,
+    traverse_obj,
+    find_element,
 )
 
 class MurrtubeBaseIE(InfoExtractor):
@@ -40,16 +42,16 @@ class MurrtubeBaseIE(InfoExtractor):
         
         MurrtubeBaseIE._age_check_done = True
 
-    def _extract_data_page(self, webpage, video_id):
-        app_div = get_element_html_by_id('app', webpage)
-        if not app_div:
-            raise ExtractorError('Could not find app element')
+    def _extract_data_page(self, webpage, page_id, fatal=True):
+        maybe_require = require if fatal else lambda _: IDENTITY
+        data_page_str = traverse_obj(webpage, (
+            {find_element(attr='id', value='app', html=True)},
+            {maybe_require('app element')},
+            {extract_attributes}, 'data-page', {str},
+            {maybe_require('data-page attribute')}))
         
-        data_page_str = extract_attributes(app_div).get('data-page')
-        if not data_page_str:
-            raise ExtractorError('Could not find data-page attribute')
-
-        return self._parse_json(data_page_str, video_id, errnote="Failed to parse JSON from data-page element")
+        return traverse_obj(self._parse_json(
+            data_page_str or '', page_id, fatal=fatal), {dict}) or {}
 
 class MurrtubeIE(MurrtubeBaseIE):
     _VALID_URL = r'https?://murrtube\.net/v/(?P<id>\w+)'
@@ -110,7 +112,7 @@ class MurrtubeIE(MurrtubeBaseIE):
 
         data = self._extract_data_page(webpage, video_id)
         
-        medium = data.get('props', {}).get('medium', {})
+        medium = traverse_obj(data, ('props', 'medium'))
 
         formats = self._extract_m3u8_formats(medium.get('hls_url'), video_id, 'mp4') if medium.get('hls_url') else []
 
@@ -119,18 +121,18 @@ class MurrtubeIE(MurrtubeBaseIE):
             'title': medium.get('title'),
             'description': medium.get('description'),
             'thumbnail': medium.get('thumbnail_url'),
-            'uploader': medium.get('user', {}).get('name'),
-            'uploader_id': medium.get('user', {}).get('slug'),
+            'uploader': traverse_obj(medium, ('user', 'name')),
+            'uploader_id': traverse_obj(medium, ('user', 'slug')),
             'timestamp': unified_timestamp(medium.get('created_at')),
             'release_timestamp': unified_timestamp(medium.get('published_at')),
             'duration': medium.get('duration'),
             'view_count': medium.get('views_count'),
             'like_count': medium.get('likes_count'),
             'comment_count': medium.get('comments_count'),
-            'tags': [tag.get('name') for tag in medium.get('tags', []) if tag.get('name')],
+            'tags': traverse_obj(medium, ('tags', ..., 'name')),
             'age_limit': 18,
             'formats': formats,
-            '_old_archive_ids': [f'murrtube {medium.get("id").replace("-", "")}'] if medium.get('id') else [],
+            '_old_archive_ids': traverse_obj(medium, ('id', {str}, {lambda x: [f'murrtube {x.replace("-", "")}']})) or [],
         }
 
 
